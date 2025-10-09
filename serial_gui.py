@@ -1,0 +1,382 @@
+import sys
+import time
+import binascii
+import os
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                            QLabel, QComboBox, QPushButton, QTextEdit, QLineEdit, QGroupBox,
+                            QCheckBox, QGridLayout, QFileDialog, QMessageBox, QSpinBox,
+                            QAction, QMenu, QTabWidget)
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QTextCursor, QIcon
+from serial_comm import SerialComm
+from data_logger import DataLogger
+
+class SerialGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.serial_comm = SerialComm()
+        self.data_logger = DataLogger()
+        self.init_ui()
+        self.setup_connections()
+        self.refresh_ports()
+        self.received_data = b''
+        self.logging_enabled = False
+        self.current_session_dir = None
+        
+        # 定时刷新串口列表
+        self.port_timer = QTimer()
+        self.port_timer.timeout.connect(self.refresh_ports)
+        self.port_timer.start(3000)  # 每3秒刷新一次
+        
+    def init_ui(self):
+        """初始化UI界面"""
+        self.setWindowTitle('串口通信工具')
+        self.setGeometry(100, 100, 800, 600)
+        
+        # 创建中央部件
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # 主布局
+        main_layout = QVBoxLayout(central_widget)
+        
+        # 顶部控制区域
+        control_layout = QHBoxLayout()
+        
+        # 串口设置组
+        port_group = QGroupBox('串口设置')
+        port_layout = QGridLayout()
+        
+        # 串口选择
+        port_layout.addWidget(QLabel('串口:'), 0, 0)
+        self.port_combo = QComboBox()
+        port_layout.addWidget(self.port_combo, 0, 1)
+        
+        # 波特率选择
+        port_layout.addWidget(QLabel('波特率:'), 1, 0)
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(['9600', '19200', '38400', '57600', '115200'])
+        port_layout.addWidget(self.baud_combo, 1, 1)
+        
+        # 数据位选择
+        port_layout.addWidget(QLabel('数据位:'), 2, 0)
+        self.data_bits_combo = QComboBox()
+        self.data_bits_combo.addItems(['5', '6', '7', '8'])
+        self.data_bits_combo.setCurrentIndex(3)  # 默认8位
+        port_layout.addWidget(self.data_bits_combo, 2, 1)
+        
+        # 校验位选择
+        port_layout.addWidget(QLabel('校验位:'), 3, 0)
+        self.parity_combo = QComboBox()
+        self.parity_combo.addItems(['无 (N)', '奇校验 (O)', '偶校验 (E)', '标记 (M)', '空格 (S)'])
+        port_layout.addWidget(self.parity_combo, 3, 1)
+        
+        # 停止位选择
+        port_layout.addWidget(QLabel('停止位:'), 4, 0)
+        self.stop_bits_combo = QComboBox()
+        self.stop_bits_combo.addItems(['1', '1.5', '2'])
+        port_layout.addWidget(self.stop_bits_combo, 4, 1)
+        
+        # 刷新和打开按钮
+        self.refresh_btn = QPushButton('刷新')
+        port_layout.addWidget(self.refresh_btn, 5, 0)
+        
+        self.open_btn = QPushButton('打开串口')
+        port_layout.addWidget(self.open_btn, 5, 1)
+        
+        port_group.setLayout(port_layout)
+        control_layout.addWidget(port_group)
+        
+        # 发送设置组
+        send_group = QGroupBox('发送设置')
+        send_layout = QVBoxLayout()
+        
+        # 发送区域
+        self.send_text = QTextEdit()
+        self.send_text.setPlaceholderText('在此输入要发送的数据...')
+        send_layout.addWidget(self.send_text)
+        
+        # 发送选项
+        send_options = QHBoxLayout()
+        
+        self.hex_send_check = QCheckBox('HEX发送')
+        send_options.addWidget(self.hex_send_check)
+        
+        self.auto_send_check = QCheckBox('自动发送')
+        send_options.addWidget(self.auto_send_check)
+        
+        send_options.addWidget(QLabel('间隔(ms):'))
+        self.send_interval = QSpinBox()
+        self.send_interval.setRange(10, 10000)
+        self.send_interval.setValue(1000)
+        send_options.addWidget(self.send_interval)
+        
+        self.send_btn = QPushButton('发送')
+        send_options.addWidget(self.send_btn)
+        
+        send_layout.addLayout(send_options)
+        send_group.setLayout(send_layout)
+        control_layout.addWidget(send_group)
+        
+        main_layout.addLayout(control_layout)
+        
+        # 接收区域
+        receive_group = QGroupBox('接收数据')
+        receive_layout = QVBoxLayout()
+        
+        self.receive_text = QTextEdit()
+        self.receive_text.setReadOnly(True)
+        receive_layout.addWidget(self.receive_text)
+        
+        # 接收选项
+        receive_options = QHBoxLayout()
+        
+        self.hex_display_check = QCheckBox('HEX显示')
+        receive_options.addWidget(self.hex_display_check)
+        
+        self.auto_line_check = QCheckBox('自动换行')
+        receive_options.addWidget(self.auto_line_check)
+        
+        self.timestamp_check = QCheckBox('时间戳')
+        receive_options.addWidget(self.timestamp_check)
+        
+        self.clear_btn = QPushButton('清空')
+        receive_options.addWidget(self.clear_btn)
+        
+        self.save_btn = QPushButton('保存')
+        receive_options.addWidget(self.save_btn)
+        
+        receive_layout.addLayout(receive_options)
+        receive_group.setLayout(receive_layout)
+        main_layout.addWidget(receive_group)
+        
+        # 状态栏
+        self.statusBar().showMessage('就绪')
+        
+        # 自动发送定时器
+        self.auto_timer = QTimer()
+        self.auto_timer.timeout.connect(self.send_data)
+        
+    def setup_connections(self):
+        """设置信号连接"""
+        self.refresh_btn.clicked.connect(self.refresh_ports)
+        self.open_btn.clicked.connect(self.toggle_port)
+        self.send_btn.clicked.connect(self.send_data)
+        self.clear_btn.clicked.connect(self.clear_receive)
+        self.save_btn.clicked.connect(self.save_receive)
+        self.auto_send_check.stateChanged.connect(self.toggle_auto_send)
+        self.hex_display_check.stateChanged.connect(self.update_receive_display)
+        
+        # 设置串口数据接收回调
+        self.serial_comm.set_callback(self.on_data_received)
+        
+    def refresh_ports(self):
+        """刷新可用串口列表"""
+        current_port = self.port_combo.currentText()
+        self.port_combo.clear()
+        
+        ports = self.serial_comm.get_ports()
+        if ports:
+            self.port_combo.addItems(ports)
+            # 尝试恢复之前选择的串口
+            index = self.port_combo.findText(current_port)
+            if index >= 0:
+                self.port_combo.setCurrentIndex(index)
+        
+    def toggle_port(self):
+        """打开或关闭串口"""
+        if not self.serial_comm.is_open:
+            # 获取串口参数
+            port = self.port_combo.currentText()
+            if not port:
+                QMessageBox.warning(self, '警告', '请选择串口')
+                return
+                
+            baudrate = int(self.baud_combo.currentText())
+            bytesize = int(self.data_bits_combo.currentText())
+            
+            parity_map = {'无 (N)': 'N', '奇校验 (O)': 'O', '偶校验 (E)': 'E', 
+                         '标记 (M)': 'M', '空格 (S)': 'S'}
+            parity = parity_map[self.parity_combo.currentText()]
+            
+            stopbits_map = {'1': 1, '1.5': 1.5, '2': 2}
+            stopbits = stopbits_map[self.stop_bits_combo.currentText()]
+            
+            # 打开串口
+            success, msg = self.serial_comm.open_port(
+                port=port, 
+                baudrate=baudrate, 
+                bytesize=bytesize, 
+                parity=parity, 
+                stopbits=stopbits
+            )
+            
+            if success:
+                self.open_btn.setText('关闭串口')
+                self.statusBar().showMessage(f'串口已打开: {port}')
+                # 禁用串口设置控件
+                self.port_combo.setEnabled(False)
+                self.baud_combo.setEnabled(False)
+                self.data_bits_combo.setEnabled(False)
+                self.parity_combo.setEnabled(False)
+                self.stop_bits_combo.setEnabled(False)
+            else:
+                QMessageBox.critical(self, '错误', msg)
+        else:
+            # 关闭串口
+            success, msg = self.serial_comm.close_port()
+            if success:
+                self.open_btn.setText('打开串口')
+                self.statusBar().showMessage('串口已关闭')
+                # 启用串口设置控件
+                self.port_combo.setEnabled(True)
+                self.baud_combo.setEnabled(True)
+                self.data_bits_combo.setEnabled(True)
+                self.parity_combo.setEnabled(True)
+                self.stop_bits_combo.setEnabled(True)
+                # 停止自动发送
+                if self.auto_timer.isActive():
+                    self.auto_timer.stop()
+                    self.auto_send_check.setChecked(False)
+            else:
+                QMessageBox.critical(self, '错误', msg)
+    
+    def send_data(self):
+        """发送数据"""
+        if not self.serial_comm.is_open:
+            QMessageBox.warning(self, '警告', '请先打开串口')
+            return
+            
+        data = self.send_text.toPlainText()
+        if not data:
+            return
+            
+        is_hex = self.hex_send_check.isChecked()
+        
+        # 如果是十六进制发送，检查格式
+        if is_hex:
+            try:
+                # 移除所有空格
+                hex_data = data.replace(" ", "")
+                # 检查是否为有效的十六进制字符串
+                int(hex_data, 16)
+            except ValueError:
+                QMessageBox.warning(self, '警告', '无效的十六进制格式')
+                return
+        
+        success, msg = self.serial_comm.send_data(data, is_hex)
+        self.statusBar().showMessage(msg)
+    
+    def on_data_received(self, data):
+        """接收到数据的回调函数"""
+        self.received_data += data
+        self.update_receive_display()
+    
+    def update_receive_display(self):
+        """更新接收显示区域"""
+        if not self.received_data:
+            return
+            
+        # 保存当前滚动条位置
+        scrollbar = self.receive_text.verticalScrollBar()
+        scroll_pos = scrollbar.value()
+        at_bottom = scroll_pos == scrollbar.maximum()
+        
+        # 清空显示
+        self.receive_text.clear()
+        
+        # 是否显示为十六进制
+        if self.hex_display_check.isChecked():
+            # 转换为十六进制显示
+            hex_str = binascii.hexlify(self.received_data).decode('ascii')
+            # 每两个字符插入一个空格
+            formatted_hex = ' '.join([hex_str[i:i+2] for i in range(0, len(hex_str), 2)])
+            display_text = formatted_hex
+        else:
+            # 尝试解码为UTF-8文本
+            try:
+                display_text = self.received_data.decode('utf-8', errors='replace')
+            except Exception:
+                display_text = str(self.received_data)
+        
+        # 是否添加时间戳
+        if self.timestamp_check.isChecked():
+            timestamp = time.strftime('[%Y-%m-%d %H:%M:%S] ', time.localtime())
+            display_text = timestamp + display_text
+        
+        # 是否自动换行
+        if self.auto_line_check.isChecked() and not self.hex_display_check.isChecked():
+            display_text = display_text.replace('\r', '\r\n')
+        
+        # 更新显示
+        self.receive_text.setPlainText(display_text)
+        
+        # 恢复滚动条位置
+        if at_bottom:
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            scrollbar.setValue(scroll_pos)
+    
+    def clear_receive(self):
+        """清空接收区域"""
+        self.received_data = b''
+        self.receive_text.clear()
+    
+    def save_receive(self):
+        """保存接收数据到文件"""
+        if not self.received_data:
+            QMessageBox.information(self, '提示', '没有数据可保存')
+            return
+            
+        filename, _ = QFileDialog.getSaveFileName(
+            self, '保存数据', '', 
+            '文本文件 (*.txt);;十六进制文件 (*.hex);;二进制文件 (*.bin);;所有文件 (*.*)'
+        )
+        
+        if not filename:
+            return
+            
+        try:
+            if filename.endswith('.hex'):
+                # 保存为十六进制文本
+                hex_str = binascii.hexlify(self.received_data).decode('ascii')
+                formatted_hex = ' '.join([hex_str[i:i+2] for i in range(0, len(hex_str), 2)])
+                with open(filename, 'w') as f:
+                    f.write(formatted_hex)
+            elif filename.endswith('.txt'):
+                # 保存为文本
+                try:
+                    text = self.received_data.decode('utf-8', errors='replace')
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                except Exception:
+                    with open(filename, 'wb') as f:
+                        f.write(self.received_data)
+            else:
+                # 保存为二进制
+                with open(filename, 'wb') as f:
+                    f.write(self.received_data)
+                    
+            QMessageBox.information(self, '成功', f'数据已保存到 {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, '错误', f'保存失败: {str(e)}')
+    
+    def toggle_auto_send(self, state):
+        """切换自动发送状态"""
+        if state == Qt.Checked:
+            if not self.serial_comm.is_open:
+                QMessageBox.warning(self, '警告', '请先打开串口')
+                self.auto_send_check.setChecked(False)
+                return
+                
+            interval = self.send_interval.value()
+            self.auto_timer.start(interval)
+        else:
+            if self.auto_timer.isActive():
+                self.auto_timer.stop()
+    
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        if self.serial_comm.is_open:
+            self.serial_comm.close_port()
+        event.accept()
