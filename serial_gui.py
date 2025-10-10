@@ -14,7 +14,6 @@ from serial_comm import SerialComm
 from data_logger import DataLogger
 
 class SerialGUI(QMainWindow):
-    # 在__init__方法中添加初始化
     def __init__(self):
         super().__init__()
         self.serial_comm = SerialComm()
@@ -32,11 +31,16 @@ class SerialGUI(QMainWindow):
         # 添加这个新的数据结构初始化
         self.received_data_with_timestamp = []
         
+        # 初始化更新节流控制变量
+        self.last_update_time = 0
+        self.update_interval = 10  # 最小更新间隔10ms
+        self.update_pending = False
+        
         # 定时刷新串口列表
         self.port_timer = QTimer()
         self.port_timer.timeout.connect(self.refresh_ports)
         self.port_timer.start(3000)  # 每3秒刷新一次
-        
+
     def init_ui(self):
         """初始化UI界面"""
         self.setWindowTitle('串口通信工具')
@@ -323,7 +327,7 @@ class SerialGUI(QMainWindow):
         success, msg = self.serial_comm.send_data(data, is_hex)
         self.statusBar().showMessage(msg)
     
-    # 修复on_data_received方法的异常处理
+    # 修复缩进错误，确保这个方法是SerialGUI类的直接方法
     def on_data_received(self, data):
         """接收到数据的回调函数"""
         try:
@@ -333,7 +337,6 @@ class SerialGUI(QMainWindow):
             
             # 将时间间隔阈值从10ms减小到5ms，确保相关数据块连续显示在同一行
             if self.last_receive_time > 0 and current_time - self.last_receive_time > 5:
-                # 这里我们将不再修改received_data，而是在数据块之间添加分隔符
                 # 在数据列表中添加一个特殊标记表示换行
                 self.received_data_with_timestamp.append(("NEWLINE", None))
             
@@ -343,13 +346,22 @@ class SerialGUI(QMainWindow):
             # 将数据和对应时间戳一起保存
             self.received_data_with_timestamp.append((data, current_timestamp))
             
-            # 更新显示
-            self.update_receive_display()
+            # 使用节流机制更新显示，避免频繁刷新导致闪烁
+            current_update_time = time.time() * 1000
+            if current_update_time - self.last_update_time >= self.update_interval and not self.update_pending:
+                self.update_pending = True
+                QTimer.singleShot(0, self._delayed_update_display)
         except Exception as e:
-            # 捕获所有异常，防止程序崩溃
             print(f"数据接收处理出错: {e}")
     
-    # 1. 修复update_receive_display方法，移除对scroll_locked的引用，优化滚动处理
+    # 修复缩进错误
+    def _delayed_update_display(self):
+        """延迟更新显示，减少闪烁"""
+        self.update_receive_display()
+        self.last_update_time = time.time() * 1000
+        self.update_pending = False
+    
+    # 修复缩进错误
     def update_receive_display(self):
         """更新接收显示区域"""
         if not self.received_data_with_timestamp:
@@ -361,11 +373,8 @@ class SerialGUI(QMainWindow):
         scroll_pos = scrollbar.value()
         max_scroll_pos = scrollbar.maximum()
         
-        # 使用更宽松的底部判断条件，避免严格相等导致的滚动问题
+        # 使用更宽松的底部判断条件
         at_bottom = scroll_pos >= max_scroll_pos - 10 or max_scroll_pos == 0
-        
-        # 清空显示
-        self.receive_text.clear()
         
         # 直接设置自动换行模式
         if self.auto_line_check.isChecked():
@@ -373,9 +382,8 @@ class SerialGUI(QMainWindow):
         else:
             self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
         
+        # 构建显示文本
         display_text = ""
-        
-        # 遍历所有带时间戳的数据块
         for item in self.received_data_with_timestamp:
             if item[0] == "NEWLINE":
                 display_text += "\n"
@@ -398,8 +406,8 @@ class SerialGUI(QMainWindow):
                     chunk_text = data.decode('utf-8', errors='replace')
                 except Exception:
                     chunk_text = str(data)
-            
-            # 添加时间戳（如果启用）
+                
+            # 添加时间戳
             if self.show_timestamp_check.isChecked() and timestamp:
                 time_str = timestamp.strftime('[%Y-%m-%d %H:%M:%S.%f]')
                 display_text += f"{time_str} {chunk_text}"
@@ -410,39 +418,34 @@ class SerialGUI(QMainWindow):
         display_text = display_text.replace('\r\n', '\n')
         display_text = display_text.replace('\r', '\n')
         
-        # 使用信号阻塞减少刷新，避免抖动
+        # 使用信号阻塞和布局冻结来减少闪烁
         self.receive_text.blockSignals(True)
+        self.receive_text.setUpdatesEnabled(False)  # 冻结更新
         
         # 显示文本
         self.receive_text.setPlainText(display_text)
         
-        # 重新启用信号
+        # 恢复更新和信号
+        self.receive_text.setUpdatesEnabled(True)  # 恢复更新
         self.receive_text.blockSignals(False)
         
         # 只有之前在底部时才滚动到底部
         if at_bottom:
-            # 异步滚动到底部，避免阻塞UI线程
             QTimer.singleShot(0, self.scroll_to_bottom)
-
-# 2. 修复scroll_to_bottom方法，移除对不存在组件的引用
+    
+    # 修复缩进错误
     def scroll_to_bottom(self):
         """滚动到底部"""
         # 分步骤确保可靠滚动到底部
-        # 1. 移动光标到文本末尾
         self.receive_text.moveCursor(QTextCursor.End)
-        
-        # 2. 处理滚动条确保可见性
         scrollbar = self.receive_text.verticalScrollBar()
         
-        # 使用定时器异步设置滚动条位置，确保UI已更新完成
         def set_scrollbar():
             scrollbar.setValue(scrollbar.maximum())
         
         QTimer.singleShot(0, set_scrollbar)
 
-# 3. 删除toggle_scroll_lock方法（整个方法）
-
-# 4. 确保clear_receive方法正确（修复重复clear的问题）
+    # 其余方法保持不变，但需要删除文件末尾的重复方法定义
     def clear_receive(self):
         """清空接收区域"""
         self.received_data = b''
