@@ -37,7 +37,10 @@ class SerialGUI(QMainWindow):
 
         # 添加这个新的数据结构初始化
         self.received_data_with_timestamp = []
+        self.send_history = []  # 存储发送历史记录
+        self.send_history_max_lines = 100  # 最大历史记录行数
         
+
         # 初始化更新节流控制变量
         self.last_update_time = 0
         self.update_interval = 10  # 最小更新间隔10ms
@@ -113,6 +116,8 @@ class SerialGUI(QMainWindow):
         # 发送区域
         self.send_text = QTextEdit()
         self.send_text.setPlaceholderText('在此输入要发送的数据...')
+        # 设置合适的高度
+        self.send_text.setMaximumHeight(80)
         send_layout.addWidget(self.send_text)
         
         # 发送选项
@@ -121,9 +126,13 @@ class SerialGUI(QMainWindow):
         self.hex_send_check = QCheckBox('HEX发送')
         send_options.addWidget(self.hex_send_check)
         
+        # 添加发送时间戳复选框
+        self.send_timestamp_check = QCheckBox('发送时间戳')
+        self.send_timestamp_check.setChecked(True)  # 默认启用
+        send_options.addWidget(self.send_timestamp_check)
+        
         self.auto_send_check = QCheckBox('自动发送')
         send_options.addWidget(self.auto_send_check)
-        
         send_options.addWidget(QLabel('间隔(ms):'))
         self.send_interval = QSpinBox()
         self.send_interval.setRange(10, 10000)
@@ -132,7 +141,21 @@ class SerialGUI(QMainWindow):
         
         self.send_btn = QPushButton('发送')
         send_options.addWidget(self.send_btn)
+        
+        # 添加清除发送历史按钮
+        self.clear_history_btn = QPushButton('清除历史')
+        send_options.addWidget(self.clear_history_btn)
+        
         send_layout.addLayout(send_options)
+        
+        # 添加发送历史显示区域
+        send_layout.addWidget(QLabel('发送历史:'))
+        self.send_history_text = QTextEdit()
+        self.send_history_text.setReadOnly(True)
+        # 移除固定最大高度限制，设置最小高度以确保初始显示效果
+        self.send_history_text.setMinimumHeight(120)  # 设置最小高度
+        self.send_history_text.setLineWrapMode(QTextEdit.WidgetWidth)  # 自动换行
+        send_layout.addWidget(self.send_history_text)
         send_group.setLayout(send_layout)
         control_layout.addWidget(send_group)
         
@@ -227,7 +250,9 @@ class SerialGUI(QMainWindow):
         self.lock_scroll_check.stateChanged.connect(self.toggle_scroll_lock)
         # 设置串口数据接收信号连接
         self.serial_comm.data_received.connect(self.on_data_received)
-    
+        # 添加清除历史按钮的信号连接
+        self.clear_history_btn.clicked.connect(self.clear_send_history)
+
     def update_line_wrap_mode(self):
         """根据自动换行设置更新文本编辑器的换行模式"""
         if self.auto_line_check.isChecked():
@@ -319,6 +344,13 @@ class SerialGUI(QMainWindow):
             return
             
         is_hex = self.hex_send_check.isChecked()
+        timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S.%f]')
+        
+        # 如果启用了发送时间戳，并且不是HEX模式
+        original_data = data  # 保存原始数据用于显示
+        if self.send_timestamp_check.isChecked() and not is_hex:
+            # 在数据前添加时间戳和空格
+            data = f"{timestamp} {data}"
         
         # 如果是十六进制发送，检查格式
         if is_hex:
@@ -333,6 +365,25 @@ class SerialGUI(QMainWindow):
         
         success, msg = self.serial_comm.send_data(data, is_hex)
         self.statusBar().showMessage(msg)
+        
+        # 记录发送历史（使用原始数据，不包含可能添加的时间戳）
+        if success:
+            # 格式：时间戳 [HEX] 数据
+            mode = "[HEX]" if is_hex else ""
+            history_entry = f"{timestamp} {mode} {original_data}\n"
+            self.send_history.append(history_entry)
+            
+            # 限制历史记录数量
+            if len(self.send_history) > self.send_history_max_lines:
+                self.send_history = self.send_history[-self.send_history_max_lines:]
+            
+            # 更新发送历史显示
+            self.send_history_text.clear()
+            for entry in self.send_history:
+                self.send_history_text.insertPlainText(entry)
+            
+            # 滚动到底部
+            self.send_history_text.moveCursor(QTextCursor.End)
     
     # 修复缩进错误，确保这个方法是SerialGUI类的直接方法
     # 修改on_data_received方法，使用更智能的节流机制
@@ -524,6 +575,11 @@ class SerialGUI(QMainWindow):
         self.receive_text.clear()
         self.data_packets = []  # 清空数据包包列表
         self.receive_text.clear()
+    
+    def clear_send_history(self):
+        """清除发送历史"""
+        self.send_history = []
+        self.send_history_text.clear()
     
     def save_receive(self):
         """保存接收数据到文件"""
