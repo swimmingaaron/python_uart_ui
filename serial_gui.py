@@ -344,6 +344,7 @@ class SerialGUI(QMainWindow):
             # 捕获所有异常，防止程序崩溃
             print(f"数据接收处理出错: {e}")
     
+    # 1. 修复update_receive_display方法，移除对scroll_locked的引用，优化滚动处理
     def update_receive_display(self):
         """更新接收显示区域"""
         if not self.received_data_with_timestamp:
@@ -353,7 +354,10 @@ class SerialGUI(QMainWindow):
         # 保存当前滚动条位置
         scrollbar = self.receive_text.verticalScrollBar()
         scroll_pos = scrollbar.value()
-        at_bottom = scroll_pos == scrollbar.maximum()
+        max_scroll_pos = scrollbar.maximum()
+        
+        # 使用更宽松的底部判断条件，避免严格相等导致的滚动问题
+        at_bottom = scroll_pos >= max_scroll_pos - 10 or max_scroll_pos == 0
         
         # 清空显示
         self.receive_text.clear()
@@ -401,17 +405,39 @@ class SerialGUI(QMainWindow):
         display_text = display_text.replace('\r\n', '\n')
         display_text = display_text.replace('\r', '\n')
         
+        # 使用信号阻塞减少刷新，避免抖动
+        self.receive_text.blockSignals(True)
+        
         # 显示文本
         self.receive_text.setPlainText(display_text)
         
-        # 根据滚动锁定状态决定是否恢复滚动位置
-        if self.scroll_locked:
-            # 如果滚动已锁定，始终滚动到底部
-            self.scroll_to_bottom()
-        elif at_bottom:
-            # 否则只有之前在底部才滚动到底部
+        # 重新启用信号
+        self.receive_text.blockSignals(False)
+        
+        # 只有之前在底部时才滚动到底部
+        if at_bottom:
+            # 异步滚动到底部，避免阻塞UI线程
+            QTimer.singleShot(0, self.scroll_to_bottom)
+
+# 2. 修复scroll_to_bottom方法，移除对不存在组件的引用
+    def scroll_to_bottom(self):
+        """滚动到底部"""
+        # 分步骤确保可靠滚动到底部
+        # 1. 移动光标到文本末尾
+        self.receive_text.moveCursor(QTextCursor.End)
+        
+        # 2. 处理滚动条确保可见性
+        scrollbar = self.receive_text.verticalScrollBar()
+        
+        # 使用定时器异步设置滚动条位置，确保UI已更新完成
+        def set_scrollbar():
             scrollbar.setValue(scrollbar.maximum())
-    
+        
+        QTimer.singleShot(0, set_scrollbar)
+
+# 3. 删除toggle_scroll_lock方法（整个方法）
+
+# 4. 确保clear_receive方法正确（修复重复clear的问题）
     def clear_receive(self):
         """清空接收区域"""
         self.received_data = b''
