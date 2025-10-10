@@ -27,6 +27,7 @@ class SerialGUI(QMainWindow):
         self.logging_enabled = False
         self.current_session_dir = None
         self.last_receive_time = 0
+        self.scroll_locked = False  # 初始化滚动锁定状态为未锁定
         
         # 添加这个新的数据结构初始化
         self.received_data_with_timestamp = []
@@ -148,6 +149,13 @@ class SerialGUI(QMainWindow):
         self.show_timestamp_check = QCheckBox('显示时间戳')
         receive_options.addWidget(self.show_timestamp_check)
         
+        # 添加滚动控制按钮
+        self.scroll_to_bottom_btn = QPushButton('滚动到底部')
+        receive_options.addWidget(self.scroll_to_bottom_btn)
+        
+        self.lock_scroll_check = QCheckBox('固定滚动')
+        receive_options.addWidget(self.lock_scroll_check)
+        
         # 读超时设置
         receive_options.addWidget(QLabel('读超时(ms):'))
         self.read_timeout_spin = QSpinBox()
@@ -184,6 +192,7 @@ class SerialGUI(QMainWindow):
         self.auto_timer = QTimer()
         self.auto_timer.timeout.connect(self.send_data)
         
+    # 在setup_connections方法中添加滚动控制按钮的信号连接
     def setup_connections(self):
         """设置信号连接"""
         self.refresh_btn.clicked.connect(self.refresh_ports)
@@ -195,10 +204,11 @@ class SerialGUI(QMainWindow):
         self.hex_display_check.stateChanged.connect(self.update_receive_display)
         self.auto_line_check.stateChanged.connect(self.update_line_wrap_mode)
         self.show_timestamp_check.stateChanged.connect(self.toggle_timestamp)
-        
         # 添加超时设置应用按钮的信号连接
         self.apply_timeout_btn.clicked.connect(self.apply_timeout_settings)
-        
+        # 添加滚动控制按钮的信号连接
+        self.scroll_to_bottom_btn.clicked.connect(self.scroll_to_bottom)
+        self.lock_scroll_check.stateChanged.connect(self.toggle_scroll_lock)
         # 设置串口数据接收信号连接
         self.serial_comm.data_received.connect(self.on_data_received)
     
@@ -334,8 +344,6 @@ class SerialGUI(QMainWindow):
             # 捕获所有异常，防止程序崩溃
             print(f"数据接收处理出错: {e}")
     
-    # 修改update_receive_display方法
-    # 确保update_receive_display方法完整
     def update_receive_display(self):
         """更新接收显示区域"""
         if not self.received_data_with_timestamp:
@@ -396,8 +404,12 @@ class SerialGUI(QMainWindow):
         # 显示文本
         self.receive_text.setPlainText(display_text)
         
-        # 恢复滚动位置
-        if at_bottom:
+        # 根据滚动锁定状态决定是否恢复滚动位置
+        if self.scroll_locked:
+            # 如果滚动已锁定，始终滚动到底部
+            self.scroll_to_bottom()
+        elif at_bottom:
+            # 否则只有之前在底部才滚动到底部
             scrollbar.setValue(scrollbar.maximum())
     
     def clear_receive(self):
@@ -486,3 +498,22 @@ class SerialGUI(QMainWindow):
         enabled = state == Qt.Checked
         self.serial_comm.set_timestamp_enabled(enabled)
         self.statusBar().showMessage(f'时间戳显示已{"启用" if enabled else "禁用"}')
+
+    # 添加这个方法到SerialGUI类中
+    # 增强scroll_to_bottom方法，确保滚动效果可靠
+    def scroll_to_bottom(self):
+        """滚动到底部"""
+        self.receive_text.moveCursor(QTextCursor.End)
+        # 额外步骤确保垂直滚动条也滚动到底部
+        scrollbar = self.receive_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        # 解锁滚动锁定，确保能自由滚动
+        self.lock_scroll_check.setChecked(False)
+    
+    # 修复toggle_scroll_lock方法，移除内部的信号连接代码
+    def toggle_scroll_lock(self, state):
+        """切换滚动锁定状态"""
+        self.scroll_locked = state == Qt.Checked
+        # 如果启用了滚动锁定，立即滚动到底部
+        if self.scroll_locked:
+            self.scroll_to_bottom()
