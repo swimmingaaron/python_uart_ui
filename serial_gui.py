@@ -28,6 +28,13 @@ class SerialGUI(QMainWindow):
         self.last_receive_time = 0
         self.scroll_locked = False  # 初始化滚动锁定状态为未锁定
         
+        # 添加增量更新所需的额外初始化
+        self._last_processed_index = 0  # 跟踪上次处理到的数据索引
+        self._last_line_wrap_mode = None  # 跟踪上次的换行模式设置
+        
+        # 优化初始缓冲区大小，减少动态调整引起的闪烁
+        self.receive_text.setUndoRedoEnabled(False)  # 禁用撤销/重做以提高性能
+
         # 添加这个新的数据结构初始化
         self.received_data_with_timestamp = []
         
@@ -328,6 +335,7 @@ class SerialGUI(QMainWindow):
         self.statusBar().showMessage(msg)
     
     # 修复缩进错误，确保这个方法是SerialGUI类的直接方法
+    # 修改on_data_received方法，使用更智能的节流机制
     def on_data_received(self, data):
         """接收到数据的回调函数"""
         try:
@@ -346,11 +354,30 @@ class SerialGUI(QMainWindow):
             # 将数据和对应时间戳一起保存
             self.received_data_with_timestamp.append((data, current_timestamp))
             
-            # 使用节流机制更新显示，避免频繁刷新导致闪烁
+            # 使用更智能的节流机制：
+            # 1. 当数据量小时，使用较短的更新间隔
+            # 2. 当数据量大时，使用较长的更新间隔
+            # 3. 确保至少在一定时间间隔内更新一次
             current_update_time = time.time() * 1000
-            if current_update_time - self.last_update_time >= self.update_interval and not self.update_pending:
-                self.update_pending = True
-                QTimer.singleShot(0, self._delayed_update_display)
+            
+            # 动态调整更新间隔
+            data_size = len(self.received_data_with_timestamp)
+            if data_size > 1000:
+                self.update_interval = 50  # 数据量大时，更新间隔加大到50ms
+            elif data_size > 100:
+                self.update_interval = 30  # 数据量中等时，更新间隔30ms
+            else:
+                self.update_interval = 10  # 数据量小时，更新间隔10ms
+            
+            # 如果有更新待处理，不重复触发
+            if not self.update_pending:
+                # 立即触发更新，但确保最小间隔
+                if current_update_time - self.last_update_time >= self.update_interval:
+                    self.update_pending = True
+                    QTimer.singleShot(0, self._delayed_update_display)
+                else:
+                    # 确保即使在高频数据情况下也会更新
+                    QTimer.singleShot(int(self.update_interval), self._delayed_update_display)
         except Exception as e:
             print(f"数据接收处理出错: {e}")
     
@@ -362,13 +389,28 @@ class SerialGUI(QMainWindow):
         self.update_pending = False
     
     # 修复缩进错误
+    # 修复clear_receive方法中的未定义变量问题
+    def clear_receive(self):
+        """清空接收区域"""
+        self.received_data = b''
+        self.received_data_with_timestamp = []  # 使用正确的数据结构
+        self.current_data_timestamp = None
+        
+        # 冻结更新以减少闪烁
+        self.receive_text.blockSignals(True)
+        self.receive_text.setUpdatesEnabled(False)
+        self.receive_text.clear()
+        self.receive_text.setUpdatesEnabled(True)
+        self.receive_text.blockSignals(False)
+    
+    # 优化update_receive_display方法，实现增量更新
     def update_receive_display(self):
-        """更新接收显示区域"""
+        """更新接收显示区域，使用增量更新减少闪烁"""
         if not self.received_data_with_timestamp:
             self.receive_text.clear()
             return
             
-        # 保存当前滚动条位置
+        # 保存当前滚动条位置和状态
         scrollbar = self.receive_text.verticalScrollBar()
         scroll_pos = scrollbar.value()
         max_scroll_pos = scrollbar.maximum()
@@ -376,17 +418,31 @@ class SerialGUI(QMainWindow):
         # 使用更宽松的底部判断条件
         at_bottom = scroll_pos >= max_scroll_pos - 10 or max_scroll_pos == 0
         
-        # 直接设置自动换行模式
-        if self.auto_line_check.isChecked():
-            self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        # 设置自动换行模式（仅在模式改变时设置，避免频繁设置）
+        if hasattr(self, '_last_line_wrap_mode'):
+            if self.auto_line_check.isChecked() != self._last_line_wrap_mode:
+                self._last_line_wrap_mode = self.auto_line_check.isChecked()
+                if self._last_line_wrap_mode:
+                    self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+                else:
+                    self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
         else:
-            self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
+            self._last_line_wrap_mode = self.auto_line_check.isChecked()
+            if self._last_line_wrap_mode:
+                self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+            else:
+                self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
         
-        # 构建显示文本
-        display_text = ""
-        for item in self.received_data_with_timestamp:
+        # 为了支持增量更新，我们需要跟踪上次处理到的位置
+        if not hasattr(self, '_last_processed_index'):
+            self._last_processed_index = 0
+        
+        # 构建增量更新的文本
+        new_display_text = ""
+        for i in range(self._last_processed_index, len(self.received_data_with_timestamp)):
+            item = self.received_data_with_timestamp[i]
             if item[0] == "NEWLINE":
-                display_text += "\n"
+                new_display_text += "\n"
                 continue
                 
             data, timestamp = item
@@ -410,23 +466,32 @@ class SerialGUI(QMainWindow):
             # 添加时间戳
             if self.show_timestamp_check.isChecked() and timestamp:
                 time_str = timestamp.strftime('[%Y-%m-%d %H:%M:%S.%f]')
-                display_text += f"{time_str} {chunk_text}"
+                new_display_text += f"{time_str} {chunk_text}"
             else:
-                display_text += chunk_text
+                new_display_text += chunk_text
         
         # 确保换行符格式正确
-        display_text = display_text.replace('\r\n', '\n')
-        display_text = display_text.replace('\r', '\n')
+        new_display_text = new_display_text.replace('\r\n', '\n')
+        new_display_text = new_display_text.replace('\r', '\n')
         
-        # 使用信号阻塞和布局冻结来减少闪烁
+        # 冻结更新以减少闪烁
         self.receive_text.blockSignals(True)
-        self.receive_text.setUpdatesEnabled(False)  # 冻结更新
+        self.receive_text.setUpdatesEnabled(False)
         
-        # 显示文本
-        self.receive_text.setPlainText(display_text)
+        # 如果是第一次更新，直接设置文本
+        if self._last_processed_index == 0:
+            self.receive_text.setPlainText(new_display_text)
+        else:
+            # 增量更新：将新文本追加到现有文本
+            cursor = self.receive_text.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(new_display_text)
+        
+        # 更新处理索引
+        self._last_processed_index = len(self.received_data_with_timestamp)
         
         # 恢复更新和信号
-        self.receive_text.setUpdatesEnabled(True)  # 恢复更新
+        self.receive_text.setUpdatesEnabled(True)
         self.receive_text.blockSignals(False)
         
         # 只有之前在底部时才滚动到底部
@@ -434,8 +499,14 @@ class SerialGUI(QMainWindow):
             QTimer.singleShot(0, self.scroll_to_bottom)
     
     # 修复缩进错误
+    # 优化scroll_to_bottom方法
     def scroll_to_bottom(self):
-        """滚动到底部"""
+        """滚动到底部，减少滚动引起的闪烁"""
+        # 直接设置滚动条到最大值，避免移动光标引起的额外更新
+        scrollbar = self.receive_text.verticalScrollBar()
+        
+        # 使用单次延迟调用，确保在UI更新完成后执行
+        QTimer.singleShot(0, lambda: scrollbar.setValue(scrollbar.maximum()))
         # 分步骤确保可靠滚动到底部
         self.receive_text.moveCursor(QTextCursor.End)
         scrollbar = self.receive_text.verticalScrollBar()
