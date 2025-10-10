@@ -2,9 +2,14 @@ import serial
 import serial.tools.list_ports
 import time
 from threading import Thread, Event
+from PyQt5.QtCore import QObject, pyqtSignal
 
-class SerialComm:
+class SerialComm(QObject):
+    # 创建数据接收信号
+    data_received = pyqtSignal(bytes)
+    
     def __init__(self):
+        super().__init__()
         self.serial_port = None
         self.is_open = False
         self.read_thread = None
@@ -78,12 +83,19 @@ class SerialComm:
             try:
                 if self.serial_port.in_waiting:
                     data = self.serial_port.read(self.serial_port.in_waiting)
-                    if data and self.callback:
-                        self.callback(data)
+                    if data:
+                        # 发射信号而不是直接调用回调函数
+                        self.data_received.emit(data)
+                        # 保持向后兼容，仍然调用回调函数（如果设置了）
+                        if self.callback:
+                            try:
+                                self.callback(data)
+                            except Exception as callback_error:
+                                print(f"回调函数执行错误: {str(callback_error)}")
             except Exception as e:
                 print(f"读取数据错误: {str(e)}")
             time.sleep(0.01)  # 短暂休眠，减少CPU占用
     
     def set_callback(self, callback):
-        """设置数据接收回调函数"""
+        """设置数据接收回调函数（保持向后兼容）"""
         self.callback = callback

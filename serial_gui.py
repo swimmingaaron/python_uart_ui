@@ -167,8 +167,8 @@ class SerialGUI(QMainWindow):
         self.auto_send_check.stateChanged.connect(self.toggle_auto_send)
         self.hex_display_check.stateChanged.connect(self.update_receive_display)
         
-        # 设置串口数据接收回调
-        self.serial_comm.set_callback(self.on_data_received)
+        # 设置串口数据接收信号连接
+        self.serial_comm.data_received.connect(self.on_data_received)
         
     def refresh_ports(self):
         """刷新可用串口列表"""

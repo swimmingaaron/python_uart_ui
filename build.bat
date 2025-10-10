@@ -1,6 +1,6 @@
 @echo off
 echo 正在安装必要的依赖...
-pip install -i https://mirrors.aliyun.com/pypi/simple pyserial pyqt5 pyinstaller
+::pip install -i https://mirrors.aliyun.com/pypi/simple pyserial pyqt5 pyinstaller
 
 echo 修改build.spec文件，移除图标引用...
 powershell -Command "(Get-Content build.spec) -replace \"icon='icon.ico',\", \"\" | Set-Content build.spec"
