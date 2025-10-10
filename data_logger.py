@@ -16,6 +16,8 @@ class DataLogger:
         timestamp = datetime.now()
         date_str = timestamp.strftime('%Y-%m-%d')
         time_str = timestamp.strftime('%H-%M-%S')
+        # 添加毫秒级时间戳
+        full_timestamp = timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         
         # 创建日期目录
         date_dir = os.path.join(self.log_dir, date_str)
@@ -30,17 +32,35 @@ class DataLogger:
             with open(file_path, 'wb') as f:
                 f.write(data)
         elif data_type == 'text':
-            # 文本数据保存为txt
+            # 文本数据保存为txt，添加时间戳
             filename = f"{time_str}_text.txt"
             file_path = os.path.join(date_dir, filename)
+            # 确保data是字符串类型
+            if isinstance(data, bytes):
+                try:
+                    text_data = data.decode('utf-8', errors='replace')
+                except:
+                    text_data = str(data)
+            else:
+                text_data = str(data)
+            
             with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(data)
+                f.write(f"[{full_timestamp}] {text_data}\n")
         elif data_type == 'hex':
-            # 十六进制数据保存为txt
+            # 十六进制数据保存为txt，添加时间戳
             filename = f"{time_str}_hex.txt"
             file_path = os.path.join(date_dir, filename)
+            # 确保data是字符串类型
+            if isinstance(data, bytes):
+                try:
+                    hex_data = data.hex()
+                except:
+                    hex_data = str(data)
+            else:
+                hex_data = str(data)
+            
             with open(file_path, 'w') as f:
-                f.write(data)
+                f.write(f"[{full_timestamp}] {hex_data}\n")
         
         return file_path
     
@@ -61,7 +81,7 @@ class DataLogger:
         
         # 记录会话信息
         session_info = {
-            'start_time': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'start_time': timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],  # 添加毫秒
             'port_info': port_info
         }
         

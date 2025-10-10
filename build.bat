@@ -1,3 +1,5 @@
+chcp 65001
+
 @echo off
 echo 正在安装必要的依赖...
 ::pip install -i https://mirrors.aliyun.com/pypi/simple pyserial pyqt5 pyinstaller

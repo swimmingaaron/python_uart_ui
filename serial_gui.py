@@ -1,7 +1,9 @@
+# 修复serial_gui.py文件，清理混乱的代码结构和注释
 import sys
 import time
 import binascii
 import os
+from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLabel, QComboBox, QPushButton, QTextEdit, QLineEdit, QGroupBox,
                             QCheckBox, QGridLayout, QFileDialog, QMessageBox, QSpinBox,
@@ -20,8 +22,10 @@ class SerialGUI(QMainWindow):
         self.setup_connections()
         self.refresh_ports()
         self.received_data = b''
+        self.current_data_timestamp = None
         self.logging_enabled = False
         self.current_session_dir = None
+        self.last_receive_time = 0
         
         # 定时刷新串口列表
         self.port_timer = QTimer()
@@ -80,7 +84,6 @@ class SerialGUI(QMainWindow):
         # 刷新和打开按钮
         self.refresh_btn = QPushButton('刷新')
         port_layout.addWidget(self.refresh_btn, 5, 0)
-        
         self.open_btn = QPushButton('打开串口')
         port_layout.addWidget(self.open_btn, 5, 1)
         
@@ -113,7 +116,6 @@ class SerialGUI(QMainWindow):
         
         self.send_btn = QPushButton('发送')
         send_options.addWidget(self.send_btn)
-        
         send_layout.addLayout(send_options)
         send_group.setLayout(send_layout)
         control_layout.addWidget(send_group)
@@ -126,6 +128,7 @@ class SerialGUI(QMainWindow):
         
         self.receive_text = QTextEdit()
         self.receive_text.setReadOnly(True)
+        self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)  # 自动换行到窗口宽度
         receive_layout.addWidget(self.receive_text)
         
         # 接收选项
@@ -137,9 +140,29 @@ class SerialGUI(QMainWindow):
         self.auto_line_check = QCheckBox('自动换行')
         receive_options.addWidget(self.auto_line_check)
         
-        self.timestamp_check = QCheckBox('时间戳')
-        receive_options.addWidget(self.timestamp_check)
+        # 添加时间戳复选框
+        self.show_timestamp_check = QCheckBox('显示时间戳')
+        receive_options.addWidget(self.show_timestamp_check)
         
+        # 读超时设置
+        receive_options.addWidget(QLabel('读超时(ms):'))
+        self.read_timeout_spin = QSpinBox()
+        self.read_timeout_spin.setRange(1, 10000)
+        self.read_timeout_spin.setValue(1000)  # 默认1000ms
+        receive_options.addWidget(self.read_timeout_spin)
+        
+        # 分包超时设置
+        receive_options.addWidget(QLabel('分包超时(ms):'))
+        self.packet_timeout_spin = QSpinBox()
+        self.packet_timeout_spin.setRange(1, 1000)
+        self.packet_timeout_spin.setValue(10)  # 默认10ms
+        receive_options.addWidget(self.packet_timeout_spin)
+        
+        # 应用超时设置按钮
+        self.apply_timeout_btn = QPushButton('应用超时设置')
+        receive_options.addWidget(self.apply_timeout_btn)
+        
+        # 清空和保存按钮
         self.clear_btn = QPushButton('清空')
         receive_options.addWidget(self.clear_btn)
         
@@ -166,10 +189,24 @@ class SerialGUI(QMainWindow):
         self.save_btn.clicked.connect(self.save_receive)
         self.auto_send_check.stateChanged.connect(self.toggle_auto_send)
         self.hex_display_check.stateChanged.connect(self.update_receive_display)
+        self.auto_line_check.stateChanged.connect(self.update_line_wrap_mode)
+        self.show_timestamp_check.stateChanged.connect(self.toggle_timestamp)
+        
+        # 添加超时设置应用按钮的信号连接
+        self.apply_timeout_btn.clicked.connect(self.apply_timeout_settings)
         
         # 设置串口数据接收信号连接
         self.serial_comm.data_received.connect(self.on_data_received)
-        
+    
+    def update_line_wrap_mode(self):
+        """根据自动换行设置更新文本编辑器的换行模式"""
+        if self.auto_line_check.isChecked():
+            # 启用自动换行，换行到窗口宽度
+            self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        else:
+            # 禁用自动换行
+            self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
+    
     def refresh_ports(self):
         """刷新可用串口列表"""
         current_port = self.port_combo.currentText()
@@ -269,7 +306,41 @@ class SerialGUI(QMainWindow):
     
     def on_data_received(self, data):
         """接收到数据的回调函数"""
-        self.received_data += data
+        try:
+            # 获取当前时间（毫秒）
+            current_time = time.time() * 1000
+            
+            # 将时间间隔阈值从10ms减小到5ms，确保相关数据块连续显示在同一行
+            if self.last_receive_time > 0 and current_time - self.last_receive_time > 5:
+                # 根据是否为十六进制显示，添加适当的换行符
+                if not self.hex_display_check.isChecked():
+                    # 文本模式下添加换行符
+                    self.received_data += b'\r\n'
+            
+            # 更新上次接收时间
+            self.last_receive_time = current_time
+            
+            # 记录数据接收时的时间戳（动态更新）
+            self.current_data_timestamp = datetime.now()
+            
+            # 添加新接收的数据到总数据中
+            self.received_data += data
+            
+            # 更新显示
+            self.update_receive_display()
+        except Exception as e:
+            # 捕获所有异常，防止程序崩溃
+            print(f"数据接收处理出错: {e}")
+    
+    def update_word_wrap_mode(self):
+        """根据自动换行设置更新文本编辑器的换行模式"""
+        if self.auto_line_check.isChecked():
+            # 启用自动换行，换行到窗口宽度
+            self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        else:
+            # 禁用自动换行
+            self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
+        # 更新显示
         self.update_receive_display()
     
     def update_receive_display(self):
@@ -285,41 +356,102 @@ class SerialGUI(QMainWindow):
         # 清空显示
         self.receive_text.clear()
         
+        # 直接设置自动换行模式，而不是调用update_line_wrap_mode
+        if self.auto_line_check.isChecked():
+            self.receive_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        else:
+            self.receive_text.setLineWrapMode(QTextEdit.NoWrap)
+        
         # 是否显示为十六进制
         if self.hex_display_check.isChecked():
-            # 转换为十六进制显示
-            hex_str = binascii.hexlify(self.received_data).decode('ascii')
-            # 每两个字符插入一个空格
-            formatted_hex = ' '.join([hex_str[i:i+2] for i in range(0, len(hex_str), 2)])
-            display_text = formatted_hex
+            try:
+                # 先尝试解码为文本以保留换行符信息
+                text_data = self.received_data.decode('utf-8', errors='replace')
+                # 处理换行符，确保统一使用\n
+                text_data = text_data.replace('\r\n', '\n')
+                text_data = text_data.replace('\r', '\n')
+                
+                # 分割成行
+                lines = text_data.split('\n')
+                
+                # 是否添加时间戳
+                if self.show_timestamp_check.isChecked() and self.current_data_timestamp:
+                    try:
+                        timestamp = self.current_data_timestamp.strftime('[%Y-%m-%d %H:%M:%S.%f]')
+                        display_text = f"{timestamp} {formatted_hex}"
+                    except Exception:
+                        display_text = formatted_hex
+                else:
+                    display_text = formatted_hex
+            except Exception:
+                # 添加缺失的except块
+                # 如果处理失败，使用默认的十六进制格式化
+                hex_str = binascii.hexlify(self.received_data).decode('ascii')
+                formatted_hex = ' '.join([hex_str[i:i+2] for i in range(0, len(hex_str), 2)])
+                display_text = formatted_hex
         else:
             # 尝试解码为UTF-8文本
             try:
                 display_text = self.received_data.decode('utf-8', errors='replace')
             except Exception:
                 display_text = str(self.received_data)
+            
+            # 处理换行符，确保统一使用\n
+            display_text = display_text.replace('\r\n', '\n')
+            display_text = display_text.replace('\r', '\n')
+            
+            # 是否添加时间戳
+            if self.show_timestamp_check.isChecked() and self.current_data_timestamp:
+                try:
+                    # 使用当前动态更新的时间戳
+                    timestamp = self.current_data_timestamp.strftime('[%Y-%m-%d %H:%M:%S.%f]')
+                    
+                    # 分割成行并为每行添加时间戳
+                    lines = display_text.split('\n')
+                    timestamped_lines = []
+                    for line in lines:
+                        if line.strip() or len(lines) == 1:  # 处理空行和单行情况
+                            # 时间戳显示在每行数据前面
+                            timestamped_lines.append(f"{timestamp} {line}")
+                        else:
+                            timestamped_lines.append('')  # 保留空行
+                    
+                    # 重新组合成文本
+                    display_text = '\n'.join(timestamped_lines)
+                except Exception as e:
+                    # 如果时间戳处理出错，降级为只显示原始文本
+                    pass  # 保留原来的display_text
         
-        # 是否添加时间戳
-        if self.timestamp_check.isChecked():
-            timestamp = time.strftime('[%Y-%m-%d %H:%M:%S] ', time.localtime())
-            display_text = timestamp + display_text
-        
-        # 是否自动换行
-        if self.auto_line_check.isChecked() and not self.hex_display_check.isChecked():
-            display_text = display_text.replace('\r', '\r\n')
-        
+        # 是否自动换行 - 保留此部分以确保文本内容中的换行符正确处理
+        if self.auto_line_check.isChecked():
+            # 确保所有换行符格式统一为\r\n
+            display_text = display_text.replace('\r\n', '\n')
+            display_text = display_text.replace('\r', '\n')
+            display_text = display_text.replace('\n', '\r\n')
+
         # 更新显示
-        self.receive_text.setPlainText(display_text)
+        try:
+            self.receive_text.setPlainText(display_text)
+        except Exception as e:
+            # 防止更新显示时出错
+            self.receive_text.setPlainText("显示更新出错")
         
         # 恢复滚动条位置
-        if at_bottom:
-            scrollbar.setValue(scrollbar.maximum())
-        else:
-            scrollbar.setValue(scroll_pos)
+        try:
+            if at_bottom:
+                scrollbar.setValue(scrollbar.maximum())
+            else:
+                scrollbar.setValue(scroll_pos)
+        except Exception as e:
+            # 忽略滚动条位置恢复错误
+            pass
     
     def clear_receive(self):
         """清空接收区域"""
         self.received_data = b''
+        self.current_data_timestamp = None  # 重置时间戳
+        self.receive_text.clear()
+        self.data_packets = []  # 清空数据包包列表
         self.receive_text.clear()
     
     def save_receive(self):
@@ -380,3 +512,23 @@ class SerialGUI(QMainWindow):
         if self.serial_comm.is_open:
             self.serial_comm.close_port()
         event.accept()
+
+    def apply_timeout_settings(self):
+        """应用超时设置"""
+        read_timeout = self.read_timeout_spin.value() / 1000.0  # 转换为秒
+        packet_timeout = self.packet_timeout_spin.value() / 1000.0  # 转换为秒
+        
+        # 设置串口通信对象的超时参数
+        self.serial_comm.set_timeouts(read_timeout, packet_timeout)
+        
+        # 更新状态栏提示
+        self.statusBar().showMessage(f'已应用超时设置: 读超时={read_timeout}s, 分包超时={packet_timeout}s')
+
+    # 其他方法保持不变...
+    
+    # 在apply_timeout_settings方法后添加toggle_timestamp方法
+    def toggle_timestamp(self, state):
+        """切换时间戳显示状态"""
+        enabled = state == Qt.Checked
+        self.serial_comm.set_timestamp_enabled(enabled)
+        self.statusBar().showMessage(f'时间戳显示已{"启用" if enabled else "禁用"}')
