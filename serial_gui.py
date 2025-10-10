@@ -139,20 +139,25 @@ class SerialGUI(QMainWindow):
         # 接收选项
         receive_options = QHBoxLayout()
         
+        # 在第149行HEX显示和显示时间戳复选框之间添加自动换行复选框
+        # 修改HEX显示复选框，设置默认选中
         self.hex_display_check = QCheckBox('HEX显示')
+        self.hex_display_check.setChecked(True)  # 设置默认选中
         receive_options.addWidget(self.hex_display_check)
         
+        # 添加自动换行复选框
         self.auto_line_check = QCheckBox('自动换行')
+        self.auto_line_check.setChecked(True)  # 默认启用自动换行
         receive_options.addWidget(self.auto_line_check)
         
-        # 添加时间戳复选框
+        # 修改显示时间戳复选框，设置默认选中
         self.show_timestamp_check = QCheckBox('显示时间戳')
+        self.show_timestamp_check.setChecked(True)  # 设置默认选中
         receive_options.addWidget(self.show_timestamp_check)
         
         # 添加滚动控制按钮
         self.scroll_to_bottom_btn = QPushButton('滚动到底部')
         receive_options.addWidget(self.scroll_to_bottom_btn)
-        
         self.lock_scroll_check = QCheckBox('固定滚动')
         receive_options.addWidget(self.lock_scroll_check)
         
