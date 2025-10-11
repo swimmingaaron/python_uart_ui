@@ -109,6 +109,36 @@ class SerialGUI(QMainWindow):
         port_group.setLayout(port_layout)
         control_layout.addWidget(port_group)
         
+        # 电流设置组 - 新增部分
+        current_group = QGroupBox('电流设置')
+        current_layout = QGridLayout()
+        
+        # 电流设置下拉菜单
+        current_layout.addWidget(QLabel('电流设置:'), 0, 0)
+        self.current_combo = QComboBox()
+        current_values = [f'{i}mA' for i in range(10, 101, 10)]
+        self.current_combo.addItems(current_values)
+        current_layout.addWidget(self.current_combo, 0, 1)
+        
+        # OPA1设置下拉菜单
+        current_layout.addWidget(QLabel('OPA1设置:'), 1, 0)
+        self.opa1_combo = QComboBox()
+        self.opa1_combo.addItems(['X1', 'X2', 'X10'])
+        current_layout.addWidget(self.opa1_combo, 1, 1)
+        
+        # OPA2设置下拉菜单
+        current_layout.addWidget(QLabel('OPA2设置:'), 2, 0)
+        self.opa2_combo = QComboBox()
+        self.opa2_combo.addItems(['X1', 'X2', 'X10'])
+        current_layout.addWidget(self.opa2_combo, 2, 1)
+        
+        # 添加设置按钮
+        self.set_current_btn = QPushButton('设置')
+        current_layout.addWidget(self.set_current_btn, 3, 0, 1, 2)  # 跨越两列
+        
+        current_group.setLayout(current_layout)
+        control_layout.addWidget(current_group)
+        
         # 发送设置组
         send_group = QGroupBox('发送设置')
         send_layout = QVBoxLayout()
@@ -231,7 +261,6 @@ class SerialGUI(QMainWindow):
         self.auto_timer = QTimer()
         self.auto_timer.timeout.connect(self.send_data)
         
-    # 在setup_connections方法中添加滚动控制按钮的信号连接
     def setup_connections(self):
         """设置信号连接"""
         self.refresh_btn.clicked.connect(self.refresh_ports)
@@ -242,6 +271,8 @@ class SerialGUI(QMainWindow):
         self.auto_send_check.stateChanged.connect(self.toggle_auto_send)
         self.hex_display_check.stateChanged.connect(self.update_receive_display)
         self.auto_line_check.stateChanged.connect(self.update_line_wrap_mode)
+        # 添加电流设置按钮的信号连接
+        self.set_current_btn.clicked.connect(self.send_current_settings)
         self.show_timestamp_check.stateChanged.connect(self.toggle_timestamp)
         # 添加超时设置应用按钮的信号连接
         self.apply_timeout_btn.clicked.connect(self.apply_timeout_settings)
@@ -678,3 +709,49 @@ class SerialGUI(QMainWindow):
         # 如果启用了滚动锁定，立即滚动到底部
         if self.scroll_locked:
             self.scroll_to_bottom()
+
+    def send_current_settings(self):
+        """发送电流设置"""
+        if not self.serial_comm.is_open:
+            QMessageBox.warning(self, '警告', '请先打开串口')
+            return
+            
+        # 获取当前选择的值
+        current_text = self.current_combo.currentText()
+        current_value = int(current_text.replace('mA', ''))  # 提取电流值
+        
+        # 获取OPA1和OPA2的值，并转换为数字
+        opa1_text = self.opa1_combo.currentText()
+        opa2_text = self.opa2_combo.currentText()
+        
+        # 将OPA设置转换为数字值
+        opa_map = {'X1': 1, 'X2': 2, 'X10': 10}
+        opa1_value = opa_map.get(opa1_text, 1)
+        opa2_value = opa_map.get(opa2_text, 1)
+        
+        # 构建HEX格式的数据：aa 电流值 opa1值 opa2值
+        # 这里假设电流值、opa1值和opa2值都在0-255范围内
+        # 使用aa作为命令前缀
+        hex_data = f"aa {current_value:02x} {opa1_value:02x} {opa2_value:02x}"
+        
+        # 发送HEX数据
+        success, msg = self.serial_comm.send_data(hex_data, True)  # True表示HEX模式
+        self.statusBar().showMessage(msg)
+        
+        # 记录到发送历史
+        if success:
+            timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S.%f]')
+            history_entry = f"{timestamp} [HEX] 电流设置: {hex_data}\n"
+            self.send_history.append(history_entry)
+            
+            # 限制历史记录数量
+            if len(self.send_history) > self.send_history_max_lines:
+                self.send_history = self.send_history[-self.send_history_max_lines:]
+            
+            # 更新发送历史显示
+            self.send_history_text.clear()
+            for entry in self.send_history:
+                self.send_history_text.insertPlainText(entry)
+            
+            # 滚动到底部
+            self.send_history_text.moveCursor(QTextCursor.End)
