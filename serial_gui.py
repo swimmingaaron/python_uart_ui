@@ -116,20 +116,22 @@ class SerialGUI(QMainWindow):
         # 电流设置下拉菜单
         current_layout.addWidget(QLabel('电流设置:'), 0, 0)
         self.current_combo = QComboBox()
-        current_values = [f'{i}mA' for i in range(10, 101, 10)]
+        current_values = [f'{i}mA' for i in range(5, 321, 10)]
         self.current_combo.addItems(current_values)
         current_layout.addWidget(self.current_combo, 0, 1)
         
         # opa0设置下拉菜单
         current_layout.addWidget(QLabel('opa0设置:'), 1, 0)
         self.opa0_combo = QComboBox()
-        self.opa0_combo.addItems(['X1', 'X2', 'X10'])
+        opa0_values = ['1x', '20x', '40x', '60x', '80x', '100x', '120x', '140x', '160x', '200x', '240x', '280x']
+        self.opa0_combo.addItems(opa0_values)
         current_layout.addWidget(self.opa0_combo, 1, 1)
         
         # opa1设置下拉菜单
         current_layout.addWidget(QLabel('opa1设置:'), 2, 0)
         self.opa1_combo = QComboBox()
-        self.opa1_combo.addItems(['X1', 'X2', 'X10'])
+        opa1_values = ['1x', '10x', '20x', '30x', '40x', '50x', '60x', '70x']
+        self.opa1_combo.addItems(opa1_values)
         current_layout.addWidget(self.opa1_combo, 2, 1)
         
         # 添加设置按钮
@@ -725,12 +727,42 @@ class SerialGUI(QMainWindow):
         opa1_text = self.opa1_combo.currentText()
         
         # 将OPA设置转换为数字值
-        opa_map = {'X1': 1, 'X2': 2, 'X10': 10}
-        opa0_value = opa_map.get(opa0_text, 1)
-        opa1_value = opa_map.get(opa1_text, 1)
+        # 为每个选项创建对应的数值映射
+        opa0_map = {
+            '1x': 1,
+            '20x': 20,
+            '40x': 40,
+            '60x': 60,
+            '80x': 80,
+            '100x': 100,
+            '120x': 120,
+            '140x': 140,
+            '160x': 160,
+            '200x': 200,
+            '240x': 240,
+            '280x': 280
+        }
+        
+        opa1_map = {
+            '1x': 1,
+            '10x': 10,
+            '20x': 20,
+            '30x': 30,
+            '40x': 40,
+            '50x': 50,
+            '60x': 60,
+            '70x': 70
+        }
+        
+        opa0_value = opa0_map.get(opa0_text, 1)
+        opa1_value = opa1_map.get(opa1_text, 1)
         
         # 构建HEX格式的数据：aa 电流值 opa0值 opa1值
-        # 这里假设电流值、opa0值和opa1值都在0-255范围内
+        # 确保值在0-255范围内，因为HEX格式每个字节限制
+        # 如果值超过255，取模处理
+        opa0_value = min(opa0_value, 255)
+        opa1_value = min(opa1_value, 255)
+        
         # 使用aa作为命令前缀
         hex_data = f"aa {current_value:02x} {opa0_value:02x} {opa1_value:02x}"
         
@@ -741,7 +773,7 @@ class SerialGUI(QMainWindow):
         # 记录到发送历史
         if success:
             timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S.%f]')
-            history_entry = f"{timestamp} [HEX] 电流设置: {hex_data}\n"
+            history_entry = f"{timestamp} [HEX] 电流设置: {hex_data} (电流={current_value}mA, opa0={opa0_text}, opa1={opa1_text})\n"
             self.send_history.append(history_entry)
             
             # 限制历史记录数量
