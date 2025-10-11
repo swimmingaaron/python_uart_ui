@@ -116,7 +116,7 @@ class SerialGUI(QMainWindow):
         # 电流设置下拉菜单
         current_layout.addWidget(QLabel('电流设置:'), 0, 0)
         self.current_combo = QComboBox()
-        current_values = [f'{i}mA' for i in range(5, 321, 10)]
+        current_values = [f'{i}mA' for i in range(5, 321, 5)]
         self.current_combo.addItems(current_values)
         current_layout.addWidget(self.current_combo, 0, 1)
         
