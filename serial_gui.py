@@ -120,17 +120,17 @@ class SerialGUI(QMainWindow):
         self.current_combo.addItems(current_values)
         current_layout.addWidget(self.current_combo, 0, 1)
         
-        # OPA1设置下拉菜单
-        current_layout.addWidget(QLabel('OPA1设置:'), 1, 0)
+        # opa0设置下拉菜单
+        current_layout.addWidget(QLabel('opa0设置:'), 1, 0)
+        self.opa0_combo = QComboBox()
+        self.opa0_combo.addItems(['X1', 'X2', 'X10'])
+        current_layout.addWidget(self.opa0_combo, 1, 1)
+        
+        # opa1设置下拉菜单
+        current_layout.addWidget(QLabel('opa1设置:'), 2, 0)
         self.opa1_combo = QComboBox()
         self.opa1_combo.addItems(['X1', 'X2', 'X10'])
-        current_layout.addWidget(self.opa1_combo, 1, 1)
-        
-        # OPA2设置下拉菜单
-        current_layout.addWidget(QLabel('OPA2设置:'), 2, 0)
-        self.opa2_combo = QComboBox()
-        self.opa2_combo.addItems(['X1', 'X2', 'X10'])
-        current_layout.addWidget(self.opa2_combo, 2, 1)
+        current_layout.addWidget(self.opa1_combo, 2, 1)
         
         # 添加设置按钮
         self.set_current_btn = QPushButton('设置')
@@ -720,19 +720,19 @@ class SerialGUI(QMainWindow):
         current_text = self.current_combo.currentText()
         current_value = int(current_text.replace('mA', ''))  # 提取电流值
         
-        # 获取OPA1和OPA2的值，并转换为数字
+        # 获取opa0和opa1的值，并转换为数字
+        opa0_text = self.opa0_combo.currentText()
         opa1_text = self.opa1_combo.currentText()
-        opa2_text = self.opa2_combo.currentText()
         
         # 将OPA设置转换为数字值
         opa_map = {'X1': 1, 'X2': 2, 'X10': 10}
+        opa0_value = opa_map.get(opa0_text, 1)
         opa1_value = opa_map.get(opa1_text, 1)
-        opa2_value = opa_map.get(opa2_text, 1)
         
-        # 构建HEX格式的数据：aa 电流值 opa1值 opa2值
-        # 这里假设电流值、opa1值和opa2值都在0-255范围内
+        # 构建HEX格式的数据：aa 电流值 opa0值 opa1值
+        # 这里假设电流值、opa0值和opa1值都在0-255范围内
         # 使用aa作为命令前缀
-        hex_data = f"aa {current_value:02x} {opa1_value:02x} {opa2_value:02x}"
+        hex_data = f"aa {current_value:02x} {opa0_value:02x} {opa1_value:02x}"
         
         # 发送HEX数据
         success, msg = self.serial_comm.send_data(hex_data, True)  # True表示HEX模式
