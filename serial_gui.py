@@ -721,6 +721,8 @@ class SerialGUI(QMainWindow):
         # 获取当前选择的值
         current_text = self.current_combo.currentText()
         current_value = int(current_text.replace('mA', ''))  # 提取电流值
+        # 处理电流值：除5，减1
+        current_value = (current_value // 5) - 1
         
         # 获取opa0和opa1的值，并转换为数字
         opa0_text = self.opa0_combo.currentText()
